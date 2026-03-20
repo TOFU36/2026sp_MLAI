@@ -37,3 +37,5 @@ tmp/
 *.tar.gz
 *.rar
 *.7z
+
+/hw_*/
