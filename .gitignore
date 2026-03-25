@@ -1,4 +1,5 @@
-# hw_1 专属忽略
+# hw_1
 
 *.docx
 *.pdf
+*.txt
