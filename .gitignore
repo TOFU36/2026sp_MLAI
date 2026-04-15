@@ -2,3 +2,8 @@
 *.docx
 *.pdf
 *.txt
+*.log
+*.pth
+*.ckpt
+*.h5
+*.pyc
