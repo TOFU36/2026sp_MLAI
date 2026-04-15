@@ -31,6 +31,9 @@ def main():
     data_path = 'data/raw/mitbih_train_downsampled_3000.csv'
     try:
         df = pd.read_csv(data_path, header=None)
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df.fillna(0)
     except FileNotFoundError:
         print("未找到数据，生成虚拟数据用于代码测试流程...")
         X_dummy = np.random.randn(3000, 187) * 0.1
@@ -99,7 +102,7 @@ def main():
         
         trainer = ECGTrainer(model, train_loader, test_loader, device, save_dir, criterion=criterion)
         # 训练 15 个 epoch
-        hist = trainer.fit(epochs=15, lr=1e-3) 
+        hist = trainer.fit(epochs=150, lr=1e-3) 
         
         best_dl_f1 = max(hist['val_f1'])
         dl_f1_scores.append(best_dl_f1)

@@ -44,6 +44,9 @@ class ECGDataset(Dataset):
         elif self.feature_type == 'mel':
             x = ModalityTransforms.to_mel_spectrogram(x)
             x = torch.tensor(x, dtype=torch.float32) # (1, M, T)
+        elif self.feature_type == 'cwt': 
+            x = ModalityTransforms.to_cwt(x); 
+            x = torch.tensor(x, dtype=torch.float32)
         else:
             x = torch.tensor(x, dtype=torch.float32).unsqueeze(0) # (1, 187)
 

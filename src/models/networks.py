@@ -87,3 +87,57 @@ class InceptionTime(nn.Module):
         x_concat = self.act(self.bn(x_concat))
         features = self.global_pool(x_concat).squeeze(-1)
         return self.fc(features)
+
+class ResNet2D(nn.Module):
+    """处理 Mel-Spectrogram 和 CWT 图像特征的 2D CNN"""
+    def __init__(self, in_channels=1, num_classes=5):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, padding=1)
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(2)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Linear(32, num_classes)
+
+    def forward(self, x):
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        x = self.global_pool(x).view(x.size(0), -1)
+        return self.fc(x)
+
+class BiLSTM(nn.Module):
+    """提取全局时序记忆的归纳偏置"""
+    def __init__(self, input_size=1, hidden_size=64, num_classes=5):
+        super().__init__()
+        # batch_first=True 需要输入形状为 (batch, seq_len, input_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=2, 
+                            bidirectional=True, batch_first=True)
+        self.fc = nn.Linear(hidden_size * 2, num_classes)
+
+    def forward(self, x):
+        # 将 (batch, 1, seq_len) 转换为 (batch, seq_len, 1)
+        x = x.transpose(1, 2)
+        out, _ = self.lstm(x)
+        # 取序列最后一个时间步的输出
+        out = out[:, -1, :] 
+        return self.fc(out)
+
+class MLPMixer(nn.Module):
+    """不具备时序偏置的纯多层感知机 (Baseline)"""
+    def __init__(self, seq_len=187, num_classes=5):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(seq_len, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Linear(128, num_classes)
+        )
+
+    def forward(self, x):
+        # 展平输入 (batch, 1, seq_len) -> (batch, seq_len)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)

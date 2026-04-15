@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torchaudio
+import scipy.signal
 
 class ECGAugmentations:
     @staticmethod
@@ -39,3 +40,12 @@ class ModalityTransforms:
         )
         mel_spec = mel_transform(torch.tensor(x).float().unsqueeze(0))
         return mel_spec.numpy() # Shape: (1, n_mels, time)
+    
+    @staticmethod
+    def to_cwt(x):
+        """时域转连续小波变换 (2D 时频特征)"""
+        widths = np.arange(1, 33) # 32个不同尺度
+        # 使用 Ricker 小波 (又称墨西哥帽小波)
+        cwt_mat = scipy.signal.cwt(x, scipy.signal.ricker, widths)
+        # 结果 shape 为 (32, 187)，扩展为 1 通道图像 (1, 32, 187)
+        return np.expand_dims(np.abs(cwt_mat), axis=0)
