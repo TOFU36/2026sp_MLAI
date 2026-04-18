@@ -25,13 +25,14 @@
 
 - **任务 1.1**：构建带残差连接的 1D-ResNet 基线，引入 Focal Loss。
    - 应对不平衡：继承作业一的经验，不盲目追求 Accuracy，在损失函数中引入 Weighted CrossEntropy（结合各类别的反比权重）。
-- **任务 1.2**：使用 5 折交叉验证在训练集上产生不同的训练子集（DL 利用 CV 验证折做 early stopping），所有模型**统一在固定测试集上评估 F1-macro**，对 DL 和 ML (RF+SMOTE) 的 5 组测试集分数进行配对 T 检验 (`p < 0.05`)。确保统计检验无偏。
+- **任务 1.2**：跑 `N_TRIALS=5` 次独立试验（不同随机种子），每次在完整训练集上训练 ML 和 DL，统一在固定测试集上评估 F1-macro，对两组测试集分数进行**配对 T 检验** (`p < 0.05`)。
 
 ### Phase 2: 模型架构与超参数的动力学探究
 
 - **任务 2.1**：感受野 (Kernel Size) 与网络深度的耦合效应（对比 Train/Val Loss 收敛状态）。
    - 假设：小卷积核（如 k=3）只能捕捉局部高频噪音或极微小的尖峰，大卷积核（如 k=15 或 k=31）才能覆盖完整的 QRS 波群并捕捉低频形态差异。
-- **任务 2.2**：优化空间的平滑性探讨（网格搜索 LR 与 Weight Decay，绘制热力图）。
+   - **统计要求**：每个 kernel size 跑 `N_TRIALS=5` 次独立试验（不同随机种子），在测试集上评估 F1-macro，使用单因素 **ANOVA** 判断组间是否有显著差异，若显著则用 **Bonferroni 校正** 事后配对 T 检验定位具体差异。
+- **任务 2.2**：优化空间的平滑性探讨（网格搜索 LR 与 Weight Decay，绘制热力图）。单次运行即可，属于探索性实验。
 
 ### Phase 3: 深度学习全链路解耦消融实验 (核心控制变量区)
 
@@ -44,21 +45,23 @@
 - **1D 对比**：原始时间序列 (Raw Time-Series) vs. 频域序列 (FFT 幅值)。探究对于 1D-CNN，究竟是直接看波形好，还是看频率好。
 - **2D 对比**：梅尔频谱图 (Mel-Spectrogram) vs. 连续小波变换图 (CWT)。探究在 2D-CNN 下，哪种时频特征更能凸显异常心搏的高频突变。
 - **1D 与 2D 对比** 原始时间序列 (Raw Time-Series) vs. 频域序列 (FFT 幅值) vs. 梅尔频谱图 (Mel-Spectrogram) vs. 连续小波变换图 (CWT)。探究对于不同的特征，同样使用 1D-CNN 在时序维度处理，判断不同特征的不同表现。
+- **统计要求**：每种模态跑 `N_TRIALS=5` 次独立试验，使用 **ANOVA + Bonferroni 事后检验** 判断模态间差异的显著性。
 
 #### 实验 3.2：特征提取器的归纳偏置之争
 *(Fix Input & Classifier, Change Extractor)*
 
 **控制变量**：固定输入为 1D 原始时间序列。
 - **对比对象**：1D-CNN（具备局部感受野） vs. Bi-LSTM（具备全局序列记忆） vs. MLP-Mixer（纯多层感知机交替）。
-- **对比1D 与 2DExtractor**：利用实验3.1的数据，对比同样使用梅尔频谱图 (Mel-Spectrogram) 或 连续小波变换图 (CWT)特征，1D-CNN 与 2D-CNN 的结果有什么不同。（2 * 2 的组合方式，可能需要使用 ANOVA 判断是否有统计学的不同）
-- **评估维度**：F1-macro、AUPRC、参数量 (Params) 和 推理延迟 (ms)。探讨哪种归纳偏置（Inductive Bias）最适合心电这一特定生理信号。
+- **统计要求**：每种架构跑 `N_TRIALS=5` 次独立试验，使用 **ANOVA + Bonferroni 事后检验** 判断架构间差异的显著性。
+- **评估维度**：F1-macro（均值±标准差）、AUPRC、参数量 (Params) 和 推理延迟 (ms)。探讨哪种归纳偏置（Inductive Bias）最适合心电这一特定生理信号。
 
 #### 实验 3.3：分类决策边界之争
 *(Fix Input & Extractor, Change Classifier)*
 
 **控制变量**：固定输入为 1D 原始时序，固定特征提取器为 **预训练并冻结权重** 的 1D-ResNet。
 - **对比对象**：提取 ResNet 倒数第二层的 Embedding（表征向量），分别接入：End-to-End Softmax、Random Forest (RF)、支持向量机 (SVM)。
-- **探究目的**：验证深度学习是否只是“特征提取得好”，而传统的 ML 分类器在处理高维稀疏 Embedding 时是否比 Softmax 更鲁棒。
+- **探究目的**：验证深度学习是否只是”特征提取得好”，而传统的 ML 分类器在处理高维稀疏 Embedding 时是否比 Softmax 更鲁棒。
+- **统计要求**：跑 `N_TRIALS=5` 次独立试验（每次重新训练特征提取器），对三种分类器的测试集 F1 进行 **ANOVA + Bonferroni 事后检验**。
 
 #### 实验 3.4：领域特定的数据增强
 *(Domain-Specific Augmentation)*
@@ -84,9 +87,10 @@
 
 不宽泛地使用通用 Transformer，而是复现使用时间序列分类领域被广泛引用的霸榜架构：**InceptionTime (Fawaz et al., 2020)**。
 
-- **为什么选它？**  
+- **为什么选它？**
   InceptionTime 是专门为 1D 时序设计的并行多尺度卷积架构。心电信号的物理特性是：既有时间极短的高频突变（QRS波，需极小卷积核），又有时间长且平缓的低频波（T波、P波，需大卷积核）。
 - **复现任务**：实现包含并行大小不同 Kernel（如 10, 20, 40）的 1D Inception 模块，对比其与固定单一 Kernel 的 1D-ResNet 在捕获复杂 P-QRS-T 综合波时的特征差异。（可以直接调用 torch 库函数）
+- **统计要求**：跑 `N_TRIALS=5` 次独立试验，对两个模型的测试集 F1 进行 **配对 T 检验** (`p < 0.05`)。
 
 ### Phase 6: 规范化的工程提交
 
