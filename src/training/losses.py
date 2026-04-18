@@ -13,7 +13,7 @@ def compute_class_weights(y):
 
 class FocalLoss(nn.Module):
     """
-    Focal Loss 应对极端类别不平衡 (任务 1.1)
+    Focal Loss 应对极端类别不平衡
     """
     def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
         super(FocalLoss, self).__init__()
