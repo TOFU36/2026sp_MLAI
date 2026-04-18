@@ -21,11 +21,13 @@ class ECGTrainer:
         else:
             self.criterion = nn.CrossEntropyLoss()
             
-    def fit(self, epochs=20, lr=1e-4, weight_decay=0e-4):
+    def fit(self, epochs=20, lr=1e-4, weight_decay=1e-4, patience=15):
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
         history = {'train_loss': [], 'val_f1':[], 'val_auprc':[]}
         best_f1 = 0.0
-        
+        epochs_no_improve = 0
+
         for epoch in range(epochs):
             self.model.train()
             train_loss = 0
@@ -37,19 +39,32 @@ class ECGTrainer:
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-                
+
             val_metrics = self.evaluate()
-            
+
             history['train_loss'].append(train_loss / len(self.train_loader))
             history['val_f1'].append(val_metrics['f1'])
             history['val_auprc'].append(val_metrics['auprc'])
-            
+
+            scheduler.step(val_metrics['f1'])
+
             print(f"Epoch {epoch+1:02d}/{epochs} - Loss: {history['train_loss'][-1]:.4f} - Val F1: {val_metrics['f1']:.4f} - Val AUPRC: {val_metrics['auprc']:.4f}")
-            
+
             if val_metrics['f1'] > best_f1:
                 best_f1 = val_metrics['f1']
                 torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'best_model.pth'))
-                
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+                if epochs_no_improve >= patience:
+                    print(f"  Early stopping at epoch {epoch+1} (no improvement for {patience} epochs)")
+                    break
+
+        # 训练结束后重新加载最优权重，确保后续 evaluate() 使用的是最佳模型
+        best_path = os.path.join(self.save_dir, 'best_model.pth')
+        if os.path.exists(best_path):
+            self.model.load_state_dict(torch.load(best_path, weights_only=True))
+
         return history
     
     def evaluate(self, loader=None):
