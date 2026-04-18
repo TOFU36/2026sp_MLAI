@@ -21,7 +21,7 @@ class ECGTrainer:
         else:
             self.criterion = nn.CrossEntropyLoss()
             
-    def fit(self, epochs=20, lr=1e-4, weight_decay=1e-4, patience=15):
+    def fit(self, epochs=100, lr=1e-4, weight_decay=1e-4, patience=10):
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
         history = {'train_loss': [], 'val_f1':[], 'val_auprc':[]}

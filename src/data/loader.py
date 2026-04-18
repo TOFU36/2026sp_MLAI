@@ -34,30 +34,41 @@ def load_train_test(train_path=DEFAULT_TRAIN_PATH, test_path=DEFAULT_TEST_PATH,
     return train_df, test_df
 
 
-def make_loader(df, feature_type='raw', batch_size=256, shuffle=False,
+def make_loader(df, feature_type='raw', batch_size=2048, shuffle=False,
                 augment=False, max_jitter=0, num_workers=4):
-    """创建单个 DataLoader（底层函数）。
+    """创建单个 DataLoader。
 
-    所有 DataLoader 统一走这里创建，确保 num_workers / pin_memory 一致。
     需要自定义参数（如 augment=True, max_jitter=10）时直接调用此函数。
-
-    See also: create_dataloaders —— 基于此函数的便捷包装，一次创建训练+测试两个 loader。
+    常规训练流程建议用 create_dataloaders 一次创建全部。
     """
     ds = ECGDataset(df, feature_type=feature_type, augment=augment, max_jitter=max_jitter)
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                       num_workers=num_workers, pin_memory=True)
 
 
-def create_dataloaders(train_df, test_df, feature_type='raw', batch_size=256,
-                       num_workers=4):
-    """便捷函数：一次性创建训练 DataLoader + 测试 DataLoader。
+def create_dataloaders(train_df, test_df, feature_type='raw', batch_size=2048,
+                       num_workers=4, val_ratio=0.1, random_state=42, augment=False):
+    """创建 train / val / test 三个 DataLoader。
 
-    内部就是调用两次 make_loader：
-      - 训练集: shuffle=True
-      - 测试集: shuffle=False
+    从 train_df 中分层抽样分出 val_ratio 作为验证集（early stopping / 模型选择），
+    test_df 仅用于最终评估，训练过程中从未见过。
+
+    Returns:
+        (train_loader, val_loader, test_loader)
     """
-    train_loader = make_loader(train_df, feature_type=feature_type,
-                               batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    test_loader = make_loader(test_df, feature_type=feature_type,
-                              batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    return train_loader, test_loader
+    y = train_df.iloc[:, -1]
+    fit_df, val_df = train_test_split(
+        train_df, test_size=val_ratio,
+        stratify=y, random_state=random_state,
+    )
+    fit_df = fit_df.reset_index(drop=True)
+    val_df = val_df.reset_index(drop=True)
+    print(f"  [分割] 训练: {len(fit_df)}, 验证: {len(val_df)}, 测试: {len(test_df)}")
+
+    train_loader = make_loader(fit_df, feature_type=feature_type, batch_size=batch_size,
+                               shuffle=True, num_workers=num_workers, augment=augment)
+    val_loader = make_loader(val_df, feature_type=feature_type, batch_size=batch_size,
+                             shuffle=False, num_workers=num_workers)
+    test_loader = make_loader(test_df, feature_type=feature_type, batch_size=batch_size,
+                              shuffle=False, num_workers=num_workers)
+    return train_loader, val_loader, test_loader

@@ -2,14 +2,17 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import json
 import numpy as np
 from scipy import stats
+from sklearn.metrics import f1_score as sk_f1_score, confusion_matrix
 
 from src.utils.tools import set_seed, get_device
 from src.utils.logger import save_json
-from src.data.loader import load_train_test, create_dataloaders, make_loader
+from src.data.loader import load_train_test, create_dataloaders
 from src.models import ResNet1D, ResNet2D
 from src.training.trainer import ECGTrainer
+from src.training.losses import FocalLoss, compute_class_weights
 
 N_TRIALS = 5
 
@@ -18,40 +21,63 @@ def main():
     set_seed(42)
     device = get_device()
     train_df, test_df = load_train_test(sample_ratio=1.0)
-    test_loader_raw = make_loader(test_df, feature_type='raw')
-    test_loader_fft = make_loader(test_df, feature_type='fft')
-    test_loader_mel = make_loader(test_df, feature_type='mel')
-    test_loader_cwt = make_loader(test_df, feature_type='cwt')
+    y_train_all = train_df.iloc[:, -1].values.astype(int)
+    alpha_weights = compute_class_weights(y_train_all)
 
     print("=" * 50)
     print("实验 3.1: 输入模态对比 (5 trials + ANOVA)")
     print("=" * 50)
 
+    # 从 Phase 1 复用 1D_Raw 结果（训练配置一致：ResNet1D K=7, FocalLoss, lr=1e-3）
+    phase1_json = 'results/logs/phase1_stats.json'
+    if os.path.exists(phase1_json):
+        with open(phase1_json) as f:
+            phase1_data = json.load(f)
+        raw_scores = phase1_data['dl_test_f1']
+        raw_histories = phase1_data.get('dl_histories', [])
+        print("\n>>> 1D_Raw (reused from Phase 1)")
+        print(f"  → Mean F1: {np.mean(raw_scores):.4f}")
+    else:
+        raise FileNotFoundError(
+            f"{phase1_json} not found — run Phase 1 first.")
+
+    # 其他模态需要独立训练
     experiments = {
-        "1D_Raw": ('raw', lambda: ResNet1D(in_channels=1, kernel_size=7), test_loader_raw),
-        "1D_FFT": ('fft', lambda: ResNet1D(in_channels=1, kernel_size=7), test_loader_fft),
-        "2D_Mel": ('mel', lambda: ResNet2D(in_channels=1), test_loader_mel),
-        "2D_CWT": ('cwt', lambda: ResNet2D(in_channels=1), test_loader_cwt),
+        "1D_FFT": 'fft',
+        "2D_Mel": 'mel',
+        "2D_CWT": 'cwt',
     }
 
-    all_scores = {}
-    for name, (feat_type, model_fn, t_loader) in experiments.items():
-        scores = []
+    all_scores = {"1D_Raw": raw_scores}
+    all_histories = {"1D_Raw": raw_histories}
+    last_trainer = None
+    last_test_loader = None
+
+    for name, feat_type in experiments.items():
+        scores, histories = [], []
+        model_fn = ResNet1D if feat_type in ('raw', 'fft') else ResNet2D
         print(f"\n>>> {name} (feature: {feat_type})")
         for trial in range(N_TRIALS):
             print(f"  Trial {trial + 1}/{N_TRIALS}")
             set_seed(42 + trial)
-            model = model_fn()
+            model = model_fn(in_channels=1, kernel_size=7) if feat_type != 'fft' else model_fn(in_channels=1)
 
-            train_loader, val_loader = create_dataloaders(train_df, test_df, feature_type=feat_type)
+            train_loader, val_loader, test_loader = create_dataloaders(
+                train_df, test_df, feature_type=feat_type)
+            criterion = FocalLoss(alpha=alpha_weights, gamma=2.0)
             trainer = ECGTrainer(model, train_loader, val_loader, device,
-                                 f'results/models/Phase3_1_{name}_T{trial}')
-            trainer.fit(epochs=10)
-            f1 = trainer.evaluate(t_loader)['f1']
+                                 f'results/models/Phase3_1_{name}_T{trial}',
+                                 criterion=criterion)
+            hist = trainer.fit(epochs=100, lr=1e-3, weight_decay=1e-4)
+            histories.append(hist)
+            f1 = trainer.evaluate(test_loader)['f1']
             scores.append(f1)
             print(f"    Test F1: {f1:.4f}")
+            last_trainer = trainer
+            last_test_loader = test_loader
 
         all_scores[name] = scores
+        all_histories[name] = histories
         print(f"  → {name} Mean F1: {np.mean(scores):.4f}")
 
     # ANOVA
@@ -60,6 +86,7 @@ def main():
     groups = [all_scores[n] for n in names]
     f_stat, p_val = stats.f_oneway(*groups)
     print(f"ANOVA: F={f_stat:.4f}, p={p_val:.4e}")
+    posthoc = []
     if p_val < 0.05:
         print("→ 组间存在显著差异 (p < 0.05)")
         n_comp = len(names) * (len(names) - 1) // 2
@@ -67,13 +94,31 @@ def main():
             for j in range(i + 1, len(names)):
                 t, p = stats.ttest_rel(groups[i], groups[j])
                 p_adj = min(p * n_comp, 1.0)
-                sig = "*" if p_adj < 0.05 else ""
-                print(f"  {names[i]} vs {names[j]}: p_adj={p_adj:.4e} {sig}")
+                sig = p_adj < 0.05
+                posthoc.append({'pair': f'{names[i]} vs {names[j]}',
+                                't': float(t), 'p_adj': float(p_adj), 'significant': sig})
+                marker = "*" if sig else ""
+                print(f"  {names[i]} vs {names[j]}: p_adj={p_adj:.4e} {marker}")
     else:
         print("→ 组间无显著差异")
 
-    save_json({k: [float(v) for v in vs] for k, vs in all_scores.items()},
-              'results/logs/phase3_1_modality.json')
+    # 最后一次训练的详细指标
+    last_metrics = last_trainer.evaluate(last_test_loader)
+    per_class_f1 = sk_f1_score(last_metrics['targets'], last_metrics['preds'], average=None).tolist()
+    cm = confusion_matrix(last_metrics['targets'], last_metrics['preds']).tolist()
+
+    save_json({
+        'scores': {k: [float(v) for v in vs] for k, vs in all_scores.items()},
+        'means': {k: float(np.mean(vs)) for k, vs in all_scores.items()},
+        'stds': {k: float(np.std(vs)) for k, vs in all_scores.items()},
+        'histories': all_histories,
+        'anova_f': float(f_stat),
+        'anova_p': float(p_val),
+        'posthoc': posthoc,
+        'per_class_f1': per_class_f1,
+        'confusion_matrix': cm,
+        'class_names': ['N', 'S', 'V', 'F', 'Q'],
+    }, 'results/logs/phase3_1_modality.json')
     print("\nPhase 3.1 done.")
 
 

@@ -1,6 +1,15 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def compute_class_weights(y):
+    """计算逆频率类别权重（sklearn balanced 风格）"""
+    counts = np.bincount(y)
+    n_classes = len(counts)
+    return [len(y) / (n_classes * c) for c in counts]
+
 
 class FocalLoss(nn.Module):
     """
