@@ -42,10 +42,18 @@ class ModalityTransforms:
         return mel_spec.numpy() # Shape: (1, n_mels, time)
     
     @staticmethod
+    def _ricker(points, width):
+        """Ricker (Mexican hat) wavelet."""
+        A = 2.0 / (np.sqrt(3.0 * width) * np.pi ** 0.25)
+        t = np.arange(0, points) - (points - 1.0) / 2
+        return A * (1.0 - (t / width) ** 2) * np.exp(-(t / width) ** 2 / 2.0)
+
+    @staticmethod
     def to_cwt(x):
         """时域转连续小波变换 (2D 时频特征)"""
-        widths = np.arange(1, 33) # 32个不同尺度
-        # 使用 Ricker 小波 (又称墨西哥帽小波)
-        cwt_mat = scipy.signal.cwt(x, scipy.signal.ricker, widths)
-        # 结果 shape 为 (32, 187)，扩展为 1 通道图像 (1, 32, 187)
+        widths = np.arange(1, 33)
+        cwt_mat = np.array([
+            np.convolve(x, ModalityTransforms._ricker(min(10 * w, len(x)), w), mode='same')
+            for w in widths
+        ])
         return np.expand_dims(np.abs(cwt_mat), axis=0)

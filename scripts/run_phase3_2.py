@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 import json
 import numpy as np
@@ -42,10 +42,11 @@ def main():
         raise FileNotFoundError(
             f"{phase1_json} not found — run Phase 1 first.")
 
-    # 其他架构独立训练
+    # 其他架构独立训练（BiLSTM 需要 smaller batch 避免 OOM）
     architectures = {
-        "Bi-LSTM": lambda: BiLSTM(hidden_size=64),
-        "MLP-Mixer": lambda: MLPMixer(seq_len=187),
+        "Bi-LSTM": (lambda: BiLSTM(hidden_size=256, num_layers=3), 1024),
+        "MLP-Mixer": (lambda: MLPMixer(seq_len=187, hidden_dim=256, num_layers=8,
+                                       tokens_ff_dim=256, channels_ff_dim=1024), 2048),
     }
 
     all_scores = {"1D-ResNet": resnet_scores}
@@ -60,14 +61,15 @@ def main():
         },
     }
 
-    for name, model_fn in architectures.items():
+    for name, (model_fn, batch_size) in architectures.items():
         scores, histories = [], []
         print(f"\n>>> {name}")
         for trial in range(N_TRIALS):
             print(f"  Trial {trial + 1}/{N_TRIALS}")
             set_seed(42 + trial)
             model = model_fn()
-            train_loader, val_loader, test_loader = create_dataloaders(train_df, test_df)
+            train_loader, val_loader, test_loader = create_dataloaders(
+                train_df, test_df, batch_size=batch_size)
             criterion = FocalLoss(alpha=alpha_weights, gamma=2.0)
             trainer = ECGTrainer(model, train_loader, val_loader, device,
                                  f'results/models/Phase3_2_{name}_T{trial}',

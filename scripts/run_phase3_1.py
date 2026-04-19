@@ -1,9 +1,11 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
+import argparse
 import json
+import torch
 import numpy as np
 from scipy import stats
 from sklearn.metrics import f1_score as sk_f1_score, confusion_matrix
@@ -18,7 +20,32 @@ from src.training.losses import FocalLoss, compute_class_weights
 N_TRIALS = 5
 
 
+def train_or_load(model, trainer, test_loader, resume, **fit_kwargs):
+    """根据 resume 参数决定跳过已有 checkpoint 还是重新训练。
+
+    Args:
+        resume: True 时若已有 best_model.pth 则加载跳过训练；False 时始终重新训练。
+    Returns:
+        (history, test_f1)
+    """
+    ckpt = os.path.join(trainer.save_dir, 'best_model.pth')
+    if resume and os.path.exists(ckpt):
+        print(f"  [skip] Loaded existing: {ckpt}")
+        trainer.model.load_state_dict(torch.load(ckpt, weights_only=True))
+        history = []
+    else:
+        history = trainer.fit(**fit_kwargs)
+
+    metrics = trainer.evaluate(test_loader)
+    return history, metrics['f1']
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--resume', action='store_true',
+                        help='跳过已有 best_model.pth 的 trial，直接加载评估')
+    args = parser.parse_args()
+
     set_seed(42)
     device = get_device()
     train_df, test_df = load_train_test(sample_ratio=1.0)
@@ -27,9 +54,11 @@ def main():
 
     print("=" * 50)
     print("实验 3.1: 输入模态对比 (5 trials + ANOVA)")
+    if args.resume:
+        print("  [resume mode] 跳过已有 checkpoint")
     print("=" * 50)
 
-    # 从 Phase 1 复用 1D_Raw 结果（训练配置一致：ResNet1D K=7, FocalLoss, lr=1e-3）
+    # 从 Phase 1 复用 1D_Raw 结果
     phase1_json = 'results/logs/phase1_stats.json'
     if os.path.exists(phase1_json):
         with open(phase1_json) as f:
@@ -42,7 +71,6 @@ def main():
         raise FileNotFoundError(
             f"{phase1_json} not found — run Phase 1 first.")
 
-    # 其他模态需要独立训练
     experiments = {
         "1D_FFT": 'fft',
         "2D_Mel": 'mel',
@@ -69,9 +97,10 @@ def main():
             trainer = ECGTrainer(model, train_loader, val_loader, device,
                                  f'results/models/Phase3_1_{name}_T{trial}',
                                  criterion=criterion)
-            hist = trainer.fit(epochs=100, lr=1e-3, weight_decay=1e-4)
+            hist, f1 = train_or_load(
+                model, trainer, test_loader, resume=args.resume,
+                epochs=100, lr=1e-3, weight_decay=1e-4)
             histories.append(hist)
-            f1 = trainer.evaluate(test_loader)['f1']
             scores.append(f1)
             print(f"    Test F1: {f1:.4f}")
             last_trainer = trainer
@@ -103,7 +132,6 @@ def main():
     else:
         print("→ 组间无显著差异")
 
-    # 最后一次训练的详细指标
     last_metrics = last_trainer.evaluate(last_test_loader)
     per_class_f1 = sk_f1_score(last_metrics['targets'], last_metrics['preds'], average=None).tolist()
     cm = confusion_matrix(last_metrics['targets'], last_metrics['preds']).tolist()
