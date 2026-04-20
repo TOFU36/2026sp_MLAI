@@ -54,7 +54,7 @@
 
 > 将整个流水线拆分为三个模块，每次只改变其中一个模块，严格控制其他变量。
 
-#### 实验 3.1：输入特征的模态之争
+#### 实验 3.1：输入特征的模态
 *(Fix Extractor & Classifier, Change Input)*
 
 **控制变量**：1D 使用 ResNet1D，2D 使用 ResNet2D。1D_Raw 结果复用 Phase 1。
@@ -63,7 +63,7 @@
 - **统计要求**：每种模态 `N_TRIALS=5` 次，**ANOVA + Bonferroni 事后检验**。
 - **支持 `--resume`**：跳过已有 checkpoint 的 trial，直接加载评估。
 
-#### 实验 3.2：特征提取器的归纳偏置之争
+#### 实验 3.2：特征提取器的归纳偏置
 *(Fix Input & Classifier, Change Extractor)*
 
 **控制变量**：固定输入为 1D 原始时间序列。1D-ResNet 结果复用 Phase 1。
@@ -71,7 +71,7 @@
 - **公平性**：三个架构均使用文献标准配置（ResNet-18 ~8.7M, BiLSTM h=256/L=3 ~3.7M, MLP-Mixer d=256/L=8 ~4.3M）。
 - **统计要求**：`N_TRIALS=5` 次，**ANOVA + Bonferroni 事后检验**。评估维度：F1-macro（均值±标准差）、参数量、推理延迟。
 
-#### 实验 3.3：分类决策边界之争
+#### 实验 3.3：分类决策边界
 *(Fix Input & Extractor, Change Classifier)*
 
 **控制变量**：加载 Phase 1 已训练的 1D-ResNet 模型（冻结权重），提取倒数第二层 Embedding。
