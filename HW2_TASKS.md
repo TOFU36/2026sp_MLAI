@@ -153,4 +153,7 @@ src/                    源代码包
 results/
   logs/                 实验结果 JSON
   models/               模型权重 (.pth)
+  figures/              可视化图表 (.png)
+notebooks/
+  figures.ipynb         实验结果可视化
 ```

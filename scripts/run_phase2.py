@@ -3,7 +3,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+import argparse
 import json
+import torch
 import numpy as np
 from scipy import stats
 from sklearn.metrics import f1_score as sk_f1_score, confusion_matrix
@@ -16,6 +18,19 @@ from src.training.trainer import ECGTrainer
 from src.training.losses import FocalLoss, compute_class_weights
 
 N_TRIALS = 5
+
+
+def train_or_load(model, trainer, test_loader, resume, **fit_kwargs):
+    ckpt = os.path.join(trainer.save_dir, 'best_model.pth')
+    if resume and os.path.exists(ckpt):
+        print(f"  [skip] Loaded existing: {ckpt}")
+        trainer.model.load_state_dict(torch.load(ckpt, weights_only=True))
+        history = []
+    else:
+        history = trainer.fit(**fit_kwargs)
+
+    metrics = trainer.evaluate(test_loader)
+    return history, metrics['f1']
 
 
 def run_anova_with_posthoc(group_scores, group_names):
@@ -44,6 +59,11 @@ def run_anova_with_posthoc(group_scores, group_names):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--resume', action='store_true',
+                        help='跳过已有 best_model.pth 的 trial，直接加载评估')
+    args = parser.parse_args()
+
     set_seed(42)
     device = get_device()
     print(f"Using device: {device}")
@@ -57,6 +77,8 @@ def main():
     # ==================================================================
     print("\n" + "=" * 50)
     print("Task 2.1: Kernel Size Dynamics (5 trials + ANOVA)")
+    if args.resume:
+        print("  [resume mode] 跳过已有 checkpoint")
     print("=" * 50)
 
     # 从 Phase 1 复用 K=7 结果（训练配置一致：FocalLoss, lr=1e-3, wd=1e-4, epochs=100）
@@ -87,9 +109,10 @@ def main():
             trainer = ECGTrainer(model, train_loader, val_loader, device,
                                  f'results/models/Phase2_Kernel{k}_T{trial}',
                                  criterion=criterion)
-            hist = trainer.fit(epochs=100, lr=1e-3, weight_decay=1e-4)
+            hist, f1 = train_or_load(
+                model, trainer, test_loader, resume=args.resume,
+                epochs=100, lr=1e-3, weight_decay=1e-4)
 
-            f1 = trainer.evaluate(test_loader)['f1']
             scores.append(f1)
             histories.append(hist)
             print(f"    Test F1: {f1:.4f}")
@@ -126,6 +149,8 @@ def main():
     # ==================================================================
     print("\n" + "=" * 50)
     print("Task 2.2: LR vs Weight Decay Grid (单次运行)")
+    if args.resume:
+        print("  [resume mode] 跳过已有 checkpoint")
     print("=" * 50)
 
     learning_rates = [1e-2, 1e-3, 1e-4]
@@ -143,8 +168,10 @@ def main():
             trainer = ECGTrainer(model, train_loader, val_loader, device,
                                  f'results/models/Phase2_Grid_LR{lr}_WD{wd}',
                                  criterion=criterion)
-            hist = trainer.fit(epochs=20, lr=lr, weight_decay=wd)
-            f1_matrix[i][j] = float(trainer.evaluate(test_loader)['f1'])
+            hist, grid_f1 = train_or_load(
+                model, trainer, test_loader, resume=args.resume,
+                epochs=20, lr=lr, weight_decay=wd)
+            f1_matrix[i][j] = float(grid_f1)
             grid_histories[f'LR{lr}_WD{wd}'] = hist
             print(f"    Test F1: {f1_matrix[i][j]:.4f}")
 
