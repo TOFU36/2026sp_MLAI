@@ -6,4 +6,5 @@
 *.pth
 *.ckpt
 *.h5
-*.pycdata/raw/*.csv
+data/raw/*.csv
+*.pyc
