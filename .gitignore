@@ -1,0 +1,41 @@
+# 课程总体忽略规则
+
+# Python 通用
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# 数据文件（根据课程需要调整）
+*.csv
+*.data
+*.pkl
+data/
+
+# 输出文件
+output/
+results/
+*.log
+
+# 临时文件
+temp/
+tmp/
+*.bak
+*~
+
+# 大文件（超过 GitHub 限制）
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+/hw_*/
