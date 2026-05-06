@@ -1,0 +1,10 @@
+# Ignore user-specified document types
+*.docx
+*.pdf
+*.txt
+*.log
+*.pth
+*.ckpt
+*.h5
+data/raw/*.csv
+*.pyc
